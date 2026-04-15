@@ -1,115 +1,40 @@
 # Falcon Vision
 
-Falcon Vision is an industrial safety monitoring project with a FastAPI backend, MongoDB, JWT authentication, a React/Vite frontend, employee face enrollment, and monitoring-time face recognition.
+Falcon Vision is an AI-based industrial safety and monitoring project that we are still actively building.
 
-This repository now contains the backend, frontend, project documentation, and additional research/model assets that already existed in the destination repository.
+This repository currently includes:
 
-## Current scope
+- `backend/` for the FastAPI backend
+- `frontend/` for the web app UI
+- `Face Recognition/` for the face-recognition model work
+- `PPE/`, `Fall model/`, and `LLM/` for other project model/research work
+- `docs/` for project notes and context
 
-Implemented backend modules in this repo:
+## Status
 
-- organization registration and login
-- role-based authentication with only two dashboard roles: `admin` and `supervisor`
-- user CRUD for dashboard users
-- employee CRUD for real monitored workers
-- employee face image upload
-- face recognition during monitoring
-- Postman collection for testing
+This project is still in progress, so the structure, features, and documentation may continue to change.
 
-Implemented frontend modules in this repo:
+## Main Areas
 
-- React + Vite app in `frontend/`
-- admin and supervisor route separation
-- backend-connected login and signup
-- employee face upload page connected to the backend
-- monitoring page with browser camera capture and recognition requests
+- authentication and role-based access
+- employee and user management
+- face upload and recognition flow
+- live monitoring UI
+- PPE, fall detection, and LLM-related research
 
-Existing model/research assets also present in this repo:
+## Quick Start
 
-- face-recognition notebook and report in `Face Recognition/`
-- PPE detection assets in `PPE/`
-- fall detection assets in `Fall model/`
-- LLM experimentation notebook in `LLM/`
-- original zipped UI archive in `Web UI/`
-
-## Important model
-
-The project uses two different concepts:
-
-- `users`: dashboard accounts that log in to the system
-- `employees`: real people monitored by cameras
-
-Face recognition is linked to `employees`, not `users`.
-
-## Roles
-
-Only these dashboard roles should be used going forward:
-
-- `admin`
-- `supervisor`
-
-The backend currently normalizes some older role values for compatibility with older data, but new work should use only `admin` and `supervisor`.
-
-## Face recognition flow
-
-The current face-recognition flow works like this:
-
-1. Create an employee in `/api/employees`
-2. Upload one or more employee face images in `/api/employee-faces/upload`
-3. Start monitoring from the frontend
-4. The frontend captures frames from the browser camera
-5. The backend runs recognition when frames are sent to `/api/employee-faces/recognize`
-
-Important:
-
-- face upload only stores the image files and metadata
-- the model is not invoked during upload
-- recognition happens during monitoring
-
-## Repo structure
-
-```text
-FalconVision/
-├── frontend/
-│   ├── src/
-│   ├── package.json
-│   └── vite.config.ts
-├── backend/
-│   ├── app/
-│   ├── postman/
-│   ├── scripts/
-│   ├── requirements.txt
-│   └── README.md
-├── docs/
-├── Face Recognition/
-├── PPE/
-├── Fall model/
-├── LLM/
-├── Web UI/
-└── .env
-```
-
-## Backend setup
-
-From the project root:
+Backend:
 
 ```powershell
 cd backend
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
-python scripts/create_indexes.py
 uvicorn app.main:app --reload
 ```
 
-API will run at:
-
-- `http://127.0.0.1:8000`
-- Swagger docs: `http://127.0.0.1:8000/docs`
-
-## Frontend setup
-
-From the project root:
+Frontend:
 
 ```powershell
 cd frontend
@@ -117,81 +42,6 @@ npm install
 npm run dev
 ```
 
-Frontend will run at:
+## Note
 
-- `http://127.0.0.1:5173`
-
-## Environment variables
-
-The backend reads settings from `.env` at the repo root or inside `backend/`.
-
-Main settings used right now:
-
-- `MONGO_URI`
-- `MONGO_DB_NAME`
-- `JWT_SECRET_KEY`
-- `JWT_ALGORITHM`
-- `ACCESS_TOKEN_EXPIRE_MINUTES`
-- `UPLOAD_DIR`
-- `MAX_FACE_IMAGE_SIZE_MB`
-- `MAX_PDF_SIZE_MB`
-
-## Installed backend dependencies
-
-Main backend stack:
-
-- FastAPI
-- Uvicorn
-- MongoDB Motor
-- Pydantic v2
-- JWT auth with `python-jose`
-- bcrypt / passlib
-- `onnxruntime`
-- `opencv-python-headless`
-- `numpy`
-
-## Implemented API routes
-
-Currently active routes:
-
-- `GET /api/health`
-- `POST /api/auth/register-organization`
-- `POST /api/auth/login`
-- `GET /api/auth/me`
-- `POST /api/users`
-- `GET /api/users`
-- `GET /api/users/{user_id}`
-- `PATCH /api/users/{user_id}`
-- `PATCH /api/users/{user_id}/status`
-- `DELETE /api/users/{user_id}`
-- `POST /api/employees`
-- `GET /api/employees`
-- `GET /api/employees/{employee_id}`
-- `PATCH /api/employees/{employee_id}`
-- `DELETE /api/employees/{employee_id}`
-- `POST /api/employee-faces/upload`
-- `POST /api/employee-faces/recognize`
-
-## Recommended test order
-
-Use the Postman collection at:
-
-```text
-backend/postman/FalconVision.postman_collection.json
-```
-
-Recommended order:
-
-1. Register organization
-2. Login
-3. Create employee
-4. Upload employee faces
-5. Recognize employee face
-6. Create supervisor users if needed
-
-## Notes for teammates
-
-- use `employees` for face recognition, not `users`
-- upload the face images first before testing monitoring recognition
-- if you change collection structure, update `scripts/create_indexes.py`
-- if you add new routes, keep business logic in services and Mongo queries in repositories
+This README is intentionally kept simple for now while development is ongoing.
