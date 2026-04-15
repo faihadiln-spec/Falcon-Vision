@@ -26,6 +26,7 @@ Implemented frontend modules in this repo:
 
 Existing model/research assets also present in this repo:
 
+- face-recognition notebook and report in `Face Recognition/`
 - PPE detection assets in `PPE/`
 - fall detection assets in `Fall model/`
 - LLM experimentation notebook in `LLM/`
@@ -80,6 +81,7 @@ FalconVision/
 │   ├── requirements.txt
 │   └── README.md
 ├── docs/
+├── Face Recognition/
 ├── PPE/
 ├── Fall model/
 ├── LLM/
