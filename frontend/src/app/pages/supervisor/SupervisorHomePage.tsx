@@ -1,4 +1,4 @@
-import { Shield, Eye, Thermometer, AlertTriangle } from 'lucide-react';
+import { Shield, Eye, Flame, AlertTriangle } from 'lucide-react';
 import { Navigation } from '../../components/Navigation';
 import { Footer } from '../../components/Footer';
 
@@ -15,9 +15,9 @@ export function SupervisorHomePage() {
       description: 'Identify authorized personnel in restricted areas and track attendance'
     },
     {
-      icon: Thermometer,
-      title: 'Thermal Imaging',
-      description: 'Monitor equipment temperature to prevent overheating and failures'
+      icon: Flame,
+      title: 'Fire Detection',
+      description: 'Detects fire and smoke at an early stage to support rapid response and prevention'
     },
     {
       icon: AlertTriangle,

@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { Shield, Eye, Thermometer, AlertTriangle } from 'lucide-react';
+import { Shield, Eye, Flame, AlertTriangle } from 'lucide-react';
 import { Footer } from '../components/Footer';
 import logoImage from '../../assets/images/logo.png';
 
@@ -16,9 +16,9 @@ export function LandingPage() {
       description: 'Identify authorized personnel in restricted areas and track attendance'
     },
     {
-      icon: Thermometer,
-      title: 'Thermal Imaging',
-      description: 'Monitor equipment temperature to prevent overheating and failures'
+      icon: Flame,
+      title: 'Fire Detection',
+      description: 'Detects fire and smoke at an early stage to support rapid response and prevention'
     },
     {
       icon: AlertTriangle,
@@ -58,7 +58,7 @@ export function LandingPage() {
           </p>
           <p className="text-sm mb-6 max-w-3xl mx-auto opacity-90">
             Enhance workplace safety with real-time vision models that detect PPE compliance,
-            recognize personnel, monitor thermal conditions, and prevent fall accidents.
+            recognize personnel, detect fire and smoke, and prevent fall accidents.
           </p>
           <div className="flex gap-3 justify-center">
             <Link

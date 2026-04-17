@@ -15,9 +15,6 @@ export function SupervisorProfilePage() {
           
           <div className="bg-white rounded-3xl shadow-xl p-8 border border-[#d4cbb7]">
             <h2 className="font-serif text-2xl text-[#4a3c2a] mb-6">Profile</h2>
-            <div className="mb-6 rounded-2xl border border-[#e8dcc7] bg-[#fdf6ef] px-4 py-3 text-sm text-[#6b5d4f]">
-              This page now reads from the authenticated backend session. Profile editing stays disabled until the backend update endpoint exists.
-            </div>
             <div className="space-y-6">
               <div>
                 <label className="block text-[#6b5d4f] mb-2">Full Name</label>

@@ -2,7 +2,9 @@ from io import BytesIO
 from pathlib import PurePosixPath
 from zipfile import BadZipFile, ZipFile
 
+from bson import ObjectId
 from fastapi import UploadFile
+import numpy as np
 
 from app.core.constants import UserRole, normalize_user_role
 from app.core.exceptions import AppError, NotFoundError, PermissionDeniedError
@@ -15,6 +17,7 @@ from app.schemas.employee_face_schema import (
     EmployeeFaceUploadFailure,
     EmployeeFaceUploadResponse,
     FaceEmbeddingResponse,
+    FaceBoxResponse,
     FaceQualityResponse,
     FaceRecognitionResponse,
 )
@@ -152,37 +155,32 @@ class EmployeeFaceService:
         if not gallery:
             raise NotFoundError("No uploaded employee face images were found")
 
+        probe_vector = np.asarray(probe_embedding.vector, dtype=np.float32)
+        employee_gallery = await self._build_employee_gallery(gallery)
+        if not employee_gallery:
+            raise NotFoundError("No valid employee face embeddings were found")
+
         best_face_doc: dict | None = None
+        best_employee_id = None
         best_score = -1.0
-        for face_doc in gallery:
-            image = face_doc.get("image") or {}
-            storage_path = image.get("storage_path")
-            if not storage_path:
-                continue
+        for employee_id, employee_data in employee_gallery.items():
+            stacked_vectors = np.stack(employee_data["vectors"], axis=0).astype(np.float32)
+            average_vector = np.mean(stacked_vectors, axis=0)
+            average_vector /= np.linalg.norm(average_vector) + 1e-12
 
-            try:
-                reference_image = await self.storage_client.read_bytes(storage_path)
-            except OSError:
-                continue
-
-            reference_embedding = self.face_recognition_client.extract_embedding(reference_image)
-            if reference_embedding is None:
-                continue
-
-            score = self.face_recognition_client.cosine_similarity(
-                probe_embedding.vector,
-                reference_embedding.vector,
-            )
+            score = float(np.dot(probe_vector, average_vector))
             if score > best_score:
                 best_score = score
-                best_face_doc = face_doc
+                best_employee_id = employee_id
+                best_face_index = int(np.argmax(stacked_vectors @ probe_vector))
+                best_face_doc = employee_data["face_docs"][best_face_index]
 
-        if best_face_doc is None:
+        if best_face_doc is None or best_employee_id is None:
             raise NotFoundError("No valid employee face embeddings were found")
 
         employee = await self.employee_face_repository.get_employee(
             current_user["organization_id"],
-            best_face_doc["employee_id"],
+            best_employee_id,
         )
         employee_name = employee.get("full_name") if employee else None
 
@@ -193,8 +191,16 @@ class EmployeeFaceService:
             threshold=self.face_recognition_client.match_threshold,
             score=best_score,
             matched_face_id=str(best_face_doc["_id"]),
-            matched_employee_id=str(best_face_doc["employee_id"]),
+            matched_employee_id=str(best_employee_id),
             matched_employee_name=employee_name,
+            face_box=FaceBoxResponse(
+                x1=probe_embedding.bbox[0],
+                y1=probe_embedding.bbox[1],
+                x2=probe_embedding.bbox[2],
+                y2=probe_embedding.bbox[3],
+                image_width=probe_embedding.image_width,
+                image_height=probe_embedding.image_height,
+            ),
         )
 
     def _ensure_upload_permission(self, current_user: dict) -> None:
@@ -263,6 +269,63 @@ class EmployeeFaceService:
         import hashlib
 
         return hashlib.sha256(content).hexdigest()
+
+    async def _build_employee_gallery(self, gallery: list[dict]) -> dict:
+        employee_gallery: dict = {}
+
+        for face_doc in gallery:
+            reference_vector = await self._get_or_create_embedding_vector(face_doc)
+            if reference_vector is None:
+                continue
+
+            employee_id = face_doc["employee_id"]
+            if employee_id not in employee_gallery:
+                employee_gallery[employee_id] = {
+                    "face_docs": [],
+                    "vectors": [],
+                }
+
+            employee_gallery[employee_id]["face_docs"].append(face_doc)
+            employee_gallery[employee_id]["vectors"].append(reference_vector)
+
+        return employee_gallery
+
+    async def _get_or_create_embedding_vector(self, face_doc: dict) -> np.ndarray | None:
+        stored_embedding = face_doc.get("embedding") or {}
+        stored_vector = stored_embedding.get("vector") or []
+        if stored_vector:
+            return np.asarray(stored_vector, dtype=np.float32)
+
+        image = face_doc.get("image") or {}
+        storage_path = image.get("storage_path")
+        if not storage_path:
+            return None
+
+        try:
+            reference_image = await self.storage_client.read_bytes(storage_path)
+        except OSError:
+            return None
+
+        reference_embedding = self.face_recognition_client.extract_embedding(reference_image)
+        if reference_embedding is None:
+            return None
+
+        refreshed_face_doc = await self.employee_face_repository.update_embedding(
+            face_doc["organization_id"],
+            self._ensure_object_id(face_doc["_id"]),
+            model_name=reference_embedding.model_name,
+            dimension=reference_embedding.dimension,
+            vector=reference_embedding.vector,
+            detection_score=reference_embedding.detection_score,
+            frontal=reference_embedding.frontal,
+        )
+        if refreshed_face_doc is not None:
+            face_doc.update(refreshed_face_doc)
+
+        return np.asarray(reference_embedding.vector, dtype=np.float32)
+
+    def _ensure_object_id(self, value: ObjectId | str) -> ObjectId:
+        return value if isinstance(value, ObjectId) else ObjectId(value)
 
     def _to_employee_face_response(self, face_doc: dict) -> EmployeeFaceResponse:
         embedding = face_doc.get("embedding")

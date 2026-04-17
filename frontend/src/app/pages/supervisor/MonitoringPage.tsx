@@ -14,13 +14,49 @@ import {
 } from 'lucide-react';
 import { WarningModal } from '../../components/WarningModal';
 import { WarningConfirmModal } from '../../components/WarningConfirmModal';
-import { getAccessToken } from '../../lib/auth';
+import { clearAuthSession, getAccessToken } from '../../lib/auth';
 import {
   type FaceRecognitionResponse,
   recognizeEmployeeFace,
 } from '../../lib/api';
 import liveFeedImage from '../../../assets/images/live-feed.png';
 import workerDetectedImage from '../../../assets/images/worker-detected.png';
+
+const RECOGNITION_INTERVAL_MS = 250;
+const TRACKING_MIN_INTERVAL_MS = 16;
+const TRACKING_SMOOTHING_FACTOR = 0.65;
+const TRACKING_BOX_MAX_AGE_MS = 120;
+
+type LocalFaceBox = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  sourceWidth: number;
+  sourceHeight: number;
+};
+
+type BrowserDetectedFace = {
+  boundingBox: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+};
+
+type BrowserFaceDetector = {
+  detect: (source: ImageBitmapSource) => Promise<BrowserDetectedFace[]>;
+};
+
+declare global {
+  interface Window {
+    FaceDetector?: new (options?: {
+      maxDetectedFaces?: number;
+      fastMode?: boolean;
+    }) => BrowserFaceDetector;
+  }
+}
 
 async function captureVideoFrame(
   video: HTMLVideoElement,
@@ -52,9 +88,17 @@ function formatScore(score?: number | null) {
   return typeof score === 'number' ? score.toFixed(3) : '--';
 }
 
-function formatRecognitionStatus(result: FaceRecognitionResponse | null) {
+function formatRecognitionStatus(
+  result: FaceRecognitionResponse | null,
+  hasDetectedFace: boolean,
+  isRecognitionPending: boolean,
+) {
+  if (hasDetectedFace && isRecognitionPending) {
+    return 'Face detected. Waiting for recognition';
+  }
+
   if (!result) {
-    return 'Waiting for recognition';
+    return hasDetectedFace ? 'Face detected. Waiting for recognition' : 'Waiting for recognition';
   }
 
   if (result.status === 'no_face') {
@@ -62,6 +106,74 @@ function formatRecognitionStatus(result: FaceRecognitionResponse | null) {
   }
 
   return result.authorized ? 'Authorized employee detected' : 'Unauthorized or unknown face';
+}
+
+function getFaceBoxStyle(
+  box: LocalFaceBox | null,
+  video: HTMLVideoElement | null,
+) {
+  if (!box || box.sourceWidth <= 0 || box.sourceHeight <= 0 || !video) {
+    return null;
+  }
+
+  const containerWidth = video.clientWidth;
+  const containerHeight = video.clientHeight;
+  if (!containerWidth || !containerHeight) {
+    return null;
+  }
+
+  const scale = Math.min(
+    containerWidth / box.sourceWidth,
+    containerHeight / box.sourceHeight,
+  );
+  const renderedWidth = box.sourceWidth * scale;
+  const renderedHeight = box.sourceHeight * scale;
+  const offsetX = (containerWidth - renderedWidth) / 2;
+  const offsetY = (containerHeight - renderedHeight) / 2;
+
+  return {
+    left: `${offsetX + box.x * scale}px`,
+    top: `${offsetY + box.y * scale}px`,
+    width: `${Math.max(box.width, 0) * scale}px`,
+    height: `${Math.max(box.height, 0) * scale}px`,
+  };
+}
+
+function getLargestDetectedFace(detections: BrowserDetectedFace[]) {
+  if (!detections.length) {
+    return null;
+  }
+
+  return detections.reduce((largest, current) => {
+    const currentBox = current.boundingBox;
+    const largestBox = largest.boundingBox;
+    const currentArea = currentBox.width * currentBox.height;
+    const largestArea = largestBox.width * largestBox.height;
+    return currentArea > largestArea ? current : largest;
+  });
+}
+
+function smoothFaceBox(
+  previous: LocalFaceBox | null,
+  next: LocalFaceBox,
+  factor: number,
+) {
+  if (!previous || previous.sourceWidth !== next.sourceWidth || previous.sourceHeight !== next.sourceHeight) {
+    return next;
+  }
+
+  return {
+    x: previous.x + (next.x - previous.x) * factor,
+    y: previous.y + (next.y - previous.y) * factor,
+    width: previous.width + (next.width - previous.width) * factor,
+    height: previous.height + (next.height - previous.height) * factor,
+    sourceWidth: next.sourceWidth,
+    sourceHeight: next.sourceHeight,
+  };
+}
+
+function isTokenError(error: unknown) {
+  return error instanceof Error && /invalid or expired token/i.test(error.message);
 }
 
 export function MonitoringPage() {
@@ -74,11 +186,40 @@ export function MonitoringPage() {
   const [lastRecognitionAt, setLastRecognitionAt] = useState<string | null>(null);
   const [capturedFramePreview, setCapturedFramePreview] = useState<string | null>(null);
   const [cameraMessage, setCameraMessage] = useState('Start the camera to begin live face recognition.');
+  const [hasLiveVideo, setHasLiveVideo] = useState(false);
+  const [trackedFaceBox, setTrackedFaceBox] = useState<LocalFaceBox | null>(null);
+  const [isLocalTrackingEnabled, setIsLocalTrackingEnabled] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const recognitionInFlightRef = useRef(false);
+  const trackingInFlightRef = useRef(false);
+  const faceDetectorRef = useRef<BrowserFaceDetector | null>(null);
+  const trackingFrameRef = useRef<number | null>(null);
+  const lastTrackingRunAtRef = useRef(0);
+  const lastTrackedFaceBoxRef = useRef<LocalFaceBox | null>(null);
+  const lastTrackedFaceAtRef = useRef(0);
+
+  const attachStreamToVideo = async () => {
+    const video = videoRef.current;
+    const stream = streamRef.current;
+
+    if (!video || !stream) {
+      return;
+    }
+
+    if (video.srcObject !== stream) {
+      video.srcObject = stream;
+    }
+
+    try {
+      await video.play();
+      setHasLiveVideo(video.videoWidth > 0 && video.videoHeight > 0);
+    } catch {
+      // Playback can fail briefly until metadata is ready.
+    }
+  };
 
   const alerts = [
     { date: '2026-01-07', time: '14:30', image: 'Worker #1', violation: 'Missing Helmet' },
@@ -87,7 +228,19 @@ export function MonitoringPage() {
     { date: '2026-01-07', time: '14:20', image: 'Worker #2', violation: 'Missing Helmet' },
   ];
 
+  const stopTrackingLoop = () => {
+    if (trackingFrameRef.current !== null) {
+      window.cancelAnimationFrame(trackingFrameRef.current);
+      trackingFrameRef.current = null;
+    }
+    trackingInFlightRef.current = false;
+    lastTrackingRunAtRef.current = 0;
+    lastTrackedFaceBoxRef.current = null;
+    lastTrackedFaceAtRef.current = 0;
+  };
+
   const stopCameraStream = () => {
+    stopTrackingLoop();
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
 
@@ -96,6 +249,9 @@ export function MonitoringPage() {
     }
 
     recognitionInFlightRef.current = false;
+    setHasLiveVideo(false);
+    setTrackedFaceBox(null);
+    setIsLocalTrackingEnabled(false);
     setIsStreaming(false);
     setIsRecognizing(false);
   };
@@ -103,8 +259,127 @@ export function MonitoringPage() {
   useEffect(() => {
     return () => {
       stopCameraStream();
+      faceDetectorRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    if (!isStreaming) {
+      return;
+    }
+
+    const video = videoRef.current;
+    if (!video) {
+      return;
+    }
+
+    const handleReady = () => {
+      setHasLiveVideo(video.videoWidth > 0 && video.videoHeight > 0);
+      void attachStreamToVideo();
+    };
+
+    video.addEventListener('loadedmetadata', handleReady);
+    video.addEventListener('canplay', handleReady);
+    void attachStreamToVideo();
+
+    return () => {
+      video.removeEventListener('loadedmetadata', handleReady);
+      video.removeEventListener('canplay', handleReady);
+    };
+  }, [isStreaming]);
+
+  useEffect(() => {
+    if (!isStreaming || !hasLiveVideo) {
+      return;
+    }
+
+    let isCancelled = false;
+
+    const runTracking = async () => {
+      if (isCancelled) {
+        return;
+      }
+
+      const detector = faceDetectorRef.current;
+      const video = videoRef.current;
+      if (!video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+        trackingFrameRef.current = window.requestAnimationFrame(runTracking);
+        return;
+      }
+
+      const now = performance.now();
+      if (
+        trackingInFlightRef.current ||
+        now - lastTrackingRunAtRef.current < TRACKING_MIN_INTERVAL_MS
+      ) {
+        trackingFrameRef.current = window.requestAnimationFrame(runTracking);
+        return;
+      }
+
+      trackingInFlightRef.current = true;
+      lastTrackingRunAtRef.current = now;
+
+      try {
+        const activeDetector = detector;
+        if (!activeDetector) {
+          setIsLocalTrackingEnabled(false);
+          setTrackedFaceBox(null);
+          trackingFrameRef.current = window.requestAnimationFrame(runTracking);
+          return;
+        }
+
+        const detections = await activeDetector.detect(video);
+        const largestFace = getLargestDetectedFace(detections);
+        const box = largestFace?.boundingBox;
+
+        if (!box) {
+          if (lastTrackedFaceBoxRef.current && now - lastTrackedFaceAtRef.current <= TRACKING_BOX_MAX_AGE_MS) {
+            setTrackedFaceBox(lastTrackedFaceBoxRef.current);
+          } else {
+            lastTrackedFaceBoxRef.current = null;
+            setTrackedFaceBox(null);
+          }
+        } else {
+          setIsLocalTrackingEnabled(true);
+          const nextBox = {
+            x: box.x,
+            y: box.y,
+            width: box.width,
+            height: box.height,
+            sourceWidth: video.videoWidth,
+            sourceHeight: video.videoHeight,
+          };
+          const smoothedBox = smoothFaceBox(
+            lastTrackedFaceBoxRef.current,
+            nextBox,
+            TRACKING_SMOOTHING_FACTOR,
+          );
+
+          lastTrackedFaceBoxRef.current = smoothedBox;
+          lastTrackedFaceAtRef.current = now;
+          setTrackedFaceBox(smoothedBox);
+        }
+      } catch {
+        faceDetectorRef.current = null;
+        setIsLocalTrackingEnabled(false);
+        lastTrackedFaceBoxRef.current = null;
+        setTrackedFaceBox(null);
+      } finally {
+        trackingInFlightRef.current = false;
+      }
+
+      if (!isCancelled) {
+        trackingFrameRef.current = window.requestAnimationFrame(runTracking);
+      }
+    };
+
+    void runTracking();
+
+    return () => {
+      isCancelled = true;
+      stopTrackingLoop();
+    };
+  }, [isStreaming, hasLiveVideo]);
 
   useEffect(() => {
     if (!isStreaming) {
@@ -122,19 +397,28 @@ export function MonitoringPage() {
       return;
     }
 
-    const intervalId = window.setInterval(async () => {
+    let isCancelled = false;
+
+    const runRecognition = async () => {
+      if (isCancelled) {
+        return;
+      }
+
       if (recognitionInFlightRef.current) {
+        window.setTimeout(runRecognition, RECOGNITION_INTERVAL_MS);
         return;
       }
 
       const video = videoRef.current;
       const canvas = canvasRef.current;
       if (!video || !canvas || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+        window.setTimeout(runRecognition, RECOGNITION_INTERVAL_MS);
         return;
       }
 
       const frame = await captureVideoFrame(video, canvas);
       if (!frame) {
+        window.setTimeout(runRecognition, RECOGNITION_INTERVAL_MS);
         return;
       }
 
@@ -159,6 +443,18 @@ export function MonitoringPage() {
         );
       } catch (error) {
         stopCameraStream();
+        if (isTokenError(error)) {
+          clearAuthSession();
+          setModalState({
+            isOpen: true,
+            title: 'Session Expired',
+            message: 'Your login session expired. Please log in again.',
+          });
+          window.setTimeout(() => {
+            window.location.href = '/login';
+          }, 300);
+          return;
+        }
         setModalState({
           isOpen: true,
           title: 'Recognition Failed',
@@ -170,11 +466,16 @@ export function MonitoringPage() {
       } finally {
         recognitionInFlightRef.current = false;
         setIsRecognizing(false);
+        if (!isCancelled) {
+          window.setTimeout(runRecognition, RECOGNITION_INTERVAL_MS);
+        }
       }
-    }, 2500);
+    };
+
+    void runRecognition();
 
     return () => {
-      window.clearInterval(intervalId);
+      isCancelled = true;
     };
   }, [isStreaming]);
 
@@ -209,14 +510,19 @@ export function MonitoringPage() {
       });
 
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play().catch(() => undefined);
-      }
 
       setRecognitionResult(null);
       setLastRecognitionAt(null);
       setCapturedFramePreview(null);
+      setHasLiveVideo(false);
+      setTrackedFaceBox(null);
+      setIsLocalTrackingEnabled(false);
+      faceDetectorRef.current = window.FaceDetector
+        ? new window.FaceDetector({
+            maxDetectedFaces: 1,
+            fastMode: true,
+          })
+        : null;
       setCameraMessage('Camera is live and recognition is running against uploaded employee faces.');
       setIsStreaming(true);
     } catch (error) {
@@ -259,6 +565,39 @@ export function MonitoringPage() {
   };
 
   const statusIsAuthorized = recognitionResult?.status !== 'no_face' && recognitionResult?.authorized;
+  const backendFaceBox =
+    recognitionResult?.face_box
+      ? {
+          x: recognitionResult.face_box.x1,
+          y: recognitionResult.face_box.y1,
+          width: recognitionResult.face_box.x2 - recognitionResult.face_box.x1,
+          height: recognitionResult.face_box.y2 - recognitionResult.face_box.y1,
+          sourceWidth: recognitionResult.face_box.image_width,
+          sourceHeight: recognitionResult.face_box.image_height,
+        }
+      : null;
+  const activeFaceBox = isStreaming ? trackedFaceBox ?? backendFaceBox : backendFaceBox;
+  const faceBoxStyle = getFaceBoxStyle(activeFaceBox, videoRef.current);
+  const hasCompletedRecognition = recognitionResult !== null;
+  const hasFaceBox = activeFaceBox !== null;
+  const isRecognitionPending =
+    hasFaceBox &&
+    (recognitionResult === null || recognitionResult.status === 'no_face') &&
+    isRecognizing;
+  const faceLabel =
+    !hasFaceBox
+      ? null
+      : isRecognitionPending
+      ? 'Detecting...'
+      : recognitionResult?.matched_employee_name && recognitionResult.authorized
+      ? recognitionResult.matched_employee_name
+      : 'Unknown';
+  const employeeDisplayName =
+    isRecognitionPending || !hasCompletedRecognition
+      ? '--'
+      : recognitionResult?.status === 'ok' && recognitionResult.authorized && recognitionResult.matched_employee_name
+      ? recognitionResult.matched_employee_name
+      : 'Unknown';
 
   return (
     <div className="min-h-screen flex flex-col bg-[#f5f3ed]">
@@ -296,19 +635,21 @@ export function MonitoringPage() {
                 </div>
 
                 <div className="aspect-video bg-gray-900 rounded-2xl relative overflow-hidden">
-                  {isStreaming ? (
-                    <video
-                      ref={videoRef}
-                      autoPlay
-                      muted
-                      playsInline
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
+                  <video
+                    ref={videoRef}
+                    autoPlay
+                    muted
+                    playsInline
+                    className={`w-full h-full object-contain transition-opacity ${
+                      hasLiveVideo ? 'opacity-100' : 'opacity-0'
+                    }`}
+                  />
+
+                  {(!isStreaming || !hasLiveVideo) && (
                     <img
                       src={liveFeedImage}
                       alt="Live camera placeholder"
-                      className="w-full h-full object-cover opacity-75"
+                      className="absolute inset-0 w-full h-full object-contain opacity-75"
                     />
                   )}
 
@@ -317,12 +658,47 @@ export function MonitoringPage() {
                     <span className="text-white text-sm font-semibold">{isStreaming ? 'LIVE' : 'OFFLINE'}</span>
                   </div>
 
-                  {!isStreaming && (
+                  {(!isStreaming || !hasLiveVideo) && (
                     <div className="absolute inset-0 bg-black/30 flex items-center justify-center p-6">
                       <div className="text-center text-white max-w-sm">
                         <Camera className="w-12 h-12 mx-auto mb-3" />
-                        <p className="text-lg font-medium mb-2">Live face recognition is ready</p>
-                        <p className="text-sm text-white/85">{cameraMessage}</p>
+                        <p className="text-lg font-medium mb-2">
+                          {isStreaming ? 'Connecting to camera...' : 'Live face recognition is ready'}
+                        </p>
+                        <p className="text-sm text-white/85">
+                          {isStreaming
+                            ? 'The browser opened your camera. Waiting for the live video frames to appear.'
+                            : cameraMessage}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {isStreaming && hasLiveVideo && faceBoxStyle && (
+                    <div className="absolute inset-0 pointer-events-none">
+                      <div
+                        className={`absolute rounded-xl border-[3px] transition-[left,top,width,height] duration-0 ease-out ${
+                          isRecognitionPending
+                            ? 'border-[#ffb14a]'
+                            : statusIsAuthorized
+                            ? 'border-[#3ddc84]'
+                            : 'border-[#ff6b6b]'
+                        }`}
+                        style={faceBoxStyle}
+                      >
+                        {faceLabel && (
+                          <div
+                            className={`absolute left-0 -top-3 -translate-y-full px-3 py-1 rounded-full text-sm font-semibold text-white whitespace-nowrap ${
+                              isRecognitionPending
+                                ? 'bg-[#b66b1f]'
+                                : statusIsAuthorized
+                                ? 'bg-[#1f7a4d]'
+                                : 'bg-[#c44536]'
+                            }`}
+                          >
+                            {faceLabel}
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
@@ -337,23 +713,27 @@ export function MonitoringPage() {
                     </div>
                     <div>
                       <p className="text-[#6b5d4f]">Face Recognition</p>
-                      <p className="font-serif text-2xl text-[#4a3c2a]">{formatRecognitionStatus(recognitionResult)}</p>
+                      <p className="font-serif text-2xl text-[#4a3c2a]">{formatRecognitionStatus(recognitionResult, hasFaceBox, isRecognitionPending)}</p>
                     </div>
                   </div>
 
                   <div
                     className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium ${
-                      statusIsAuthorized
+                      isRecognitionPending
+                        ? 'bg-[#fff1de] text-[#b66b1f]'
+                        : statusIsAuthorized
                         ? 'bg-[#e4f5eb] text-[#1f7a4d]'
                         : 'bg-[#fde9e3] text-[#b14a2c]'
                     }`}
                   >
-                    {statusIsAuthorized ? (
+                    {isRecognitionPending ? (
+                      <ScanFace className="w-4 h-4" />
+                    ) : statusIsAuthorized ? (
                       <ShieldCheck className="w-4 h-4" />
                     ) : (
                       <ShieldAlert className="w-4 h-4" />
                     )}
-                    {statusIsAuthorized ? 'Authorized' : 'Needs Attention'}
+                    {isRecognitionPending ? 'Scanning' : statusIsAuthorized ? 'Authorized' : 'Needs Attention'}
                   </div>
                 </div>
 
@@ -362,18 +742,12 @@ export function MonitoringPage() {
                     <div className="rounded-2xl bg-[#f9f6f0] border border-[#e5dcc9] p-4">
                       <p className="text-[#6b5d4f]">Employee</p>
                       <p className="text-lg font-semibold text-[#4a3c2a]">
-                        {recognitionResult?.matched_employee_name ?? 'Unknown'}
+                        {employeeDisplayName}
                       </p>
                     </div>
                     <div className="rounded-2xl bg-[#f9f6f0] border border-[#e5dcc9] p-4">
                       <p className="text-[#6b5d4f]">Match Score</p>
-                      <p className="text-lg font-semibold text-[#4a3c2a]">{formatScore(recognitionResult?.score)}</p>
-                    </div>
-                    <div className="rounded-2xl bg-[#f9f6f0] border border-[#e5dcc9] p-4">
-                      <p className="text-[#6b5d4f]">Threshold</p>
-                      <p className="text-lg font-semibold text-[#4a3c2a]">
-                        {recognitionResult ? recognitionResult.threshold.toFixed(3) : '--'}
-                      </p>
+                      <p className="text-lg font-semibold text-[#4a3c2a]">{formatScore(isRecognitionPending ? null : recognitionResult?.score)}</p>
                     </div>
                     <div className="rounded-2xl bg-[#f9f6f0] border border-[#e5dcc9] p-4">
                       <p className="text-[#6b5d4f]">Last Checked</p>

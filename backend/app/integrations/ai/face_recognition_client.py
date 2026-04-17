@@ -29,6 +29,9 @@ class ExtractedFaceEmbedding:
     dimension: int
     detection_score: float | None
     frontal: bool | None
+    bbox: list[float]
+    image_width: int
+    image_height: int
 
 
 @dataclass(slots=True)
@@ -310,6 +313,9 @@ class FaceRecognitionClient:
             dimension=int(embedding.shape[0]),
             detection_score=float(face.det_score),
             frontal=frontal,
+            bbox=[float(value) for value in face.bbox.tolist()],
+            image_width=int(image.shape[1]),
+            image_height=int(image.shape[0]),
         )
 
     def cosine_similarity(self, probe_vector: list[float], reference_vector: list[float]) -> float:

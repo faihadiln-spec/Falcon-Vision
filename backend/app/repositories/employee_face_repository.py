@@ -5,6 +5,7 @@ from bson import ObjectId
 from app.core.constants import EntityStatus
 from app.models.employee_face_model import EmployeeFaceModel
 from app.repositories.base_repository import BaseRepository
+from app.utils.datetime import utc_now
 
 
 class EmployeeFaceRepository(BaseRepository):
@@ -57,3 +58,42 @@ class EmployeeFaceRepository(BaseRepository):
             }
         )
         return await cursor.to_list(length=None)
+
+    async def update_embedding(
+        self,
+        organization_id: ObjectId,
+        face_id: ObjectId,
+        *,
+        model_name: str,
+        dimension: int,
+        vector: list[float],
+        detection_score: float | None,
+        frontal: bool | None,
+    ) -> dict[str, Any] | None:
+        await self.collection.update_one(
+            {
+                "_id": face_id,
+                "organization_id": organization_id,
+                "is_deleted": {"$ne": True},
+            },
+            {
+                "$set": {
+                    "embedding": {
+                        "model_name": model_name,
+                        "dimension": dimension,
+                        "vector": vector,
+                        "created_at": utc_now(),
+                    },
+                    "quality.score": detection_score,
+                    "quality.frontal": frontal,
+                    "updated_at": utc_now(),
+                }
+            },
+        )
+        return await self.collection.find_one(
+            {
+                "_id": face_id,
+                "organization_id": organization_id,
+                "is_deleted": {"$ne": True},
+            }
+        )

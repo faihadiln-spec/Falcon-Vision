@@ -42,6 +42,15 @@ class EmployeeFaceUploadResponse(BaseModel):
     failures: list[EmployeeFaceUploadFailure]
 
 
+class FaceBoxResponse(BaseModel):
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+    image_width: int
+    image_height: int
+
+
 class FaceRecognitionResponse(BaseModel):
     status: str
     authorized: bool
@@ -50,3 +59,4 @@ class FaceRecognitionResponse(BaseModel):
     matched_face_id: str | None = None
     matched_employee_id: str | None = None
     matched_employee_name: str | None = None
+    face_box: FaceBoxResponse | None = None

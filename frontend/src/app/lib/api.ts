@@ -131,6 +131,14 @@ export interface FaceRecognitionResponse {
   matched_face_id?: string | null;
   matched_employee_id?: string | null;
   matched_employee_name?: string | null;
+  face_box?: {
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    image_width: number;
+    image_height: number;
+  } | null;
 }
 
 async function apiRequest<T>(path: string, options: RequestOptions = {}) {
