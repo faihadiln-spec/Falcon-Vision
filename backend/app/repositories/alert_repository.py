@@ -17,14 +17,16 @@ class AlertRepository(BaseRepository):
         self,
         organization_id: ObjectId,
         *,
-        limit: int = 100,
+        limit: int | None = None,
     ) -> list[dict[str, Any]]:
         cursor = self.collection.find(
             {
                 "organization_id": organization_id,
                 "is_deleted": {"$ne": True},
             }
-        ).sort("detected_at", -1).limit(limit)
+        ).sort("detected_at", -1)
+        if limit is not None:
+            cursor = cursor.limit(limit)
         return await cursor.to_list(length=limit)
 
     async def find_recent_duplicate(

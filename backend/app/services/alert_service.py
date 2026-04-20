@@ -20,7 +20,7 @@ class AlertService:
         self.alert_repository = alert_repository
         self.storage_client = storage_client
 
-    async def list_alerts(self, organization_id: str | ObjectId, *, limit: int = 100) -> AlertListResponse:
+    async def list_alerts(self, organization_id: str | ObjectId, *, limit: int | None = None) -> AlertListResponse:
         organization_object_id = self._ensure_object_id(organization_id)
         alerts = await self.alert_repository.list_by_organization(organization_object_id, limit=limit)
         return AlertListResponse(

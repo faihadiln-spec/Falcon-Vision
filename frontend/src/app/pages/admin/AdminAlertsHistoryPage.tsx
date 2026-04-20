@@ -16,7 +16,7 @@ export function AdminAlertsHistoryPage() {
       return;
     }
 
-    void listAlerts(token, 100).then((response) => {
+    void listAlerts(token).then((response) => {
       setAlerts(response.items);
     }).catch(() => {
       setAlerts([]);
@@ -124,7 +124,7 @@ export function AdminAlertsHistoryPage() {
 
           <div className="bg-white rounded-3xl shadow-xl p-6 border border-[#d4cbb7]">
             <h2 className="font-serif text-2xl text-[#4a3c2a] mb-6">Violation Records</h2>
-            <div className="overflow-auto">
+            <div className="overflow-auto max-h-[600px]">
               <table className="w-full">
                 <thead className="border-b-2 border-[#d4cbb7]">
                   <tr>

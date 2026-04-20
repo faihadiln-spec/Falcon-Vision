@@ -448,8 +448,9 @@ export function getFaceRecognitionStatus(token: string) {
   });
 }
 
-export function listAlerts(token: string, limit = 100) {
-  return apiRequest<AlertListResponse>(`/api/alerts?limit=${limit}`, {
+export function listAlerts(token: string, limit?: number) {
+  const query = typeof limit === 'number' ? `?limit=${limit}` : '';
+  return apiRequest<AlertListResponse>(`/api/alerts${query}`, {
     token,
   });
 }
