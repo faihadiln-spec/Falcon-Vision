@@ -1,6 +1,20 @@
 import type { AuthUser, UserRole } from './auth';
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000').replace(/\/$/, '');
+function resolveApiBaseUrl() {
+  const configuredValue = import.meta.env.VITE_API_BASE_URL?.trim();
+
+  if (configuredValue && configuredValue !== '/') {
+    return configuredValue.replace(/\/$/, '');
+  }
+
+  if (import.meta.env.DEV) {
+    return 'http://127.0.0.1:8000';
+  }
+
+  return window.location.origin.replace(/\/$/, '');
+}
+
+const API_BASE_URL = resolveApiBaseUrl();
 
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PATCH';
