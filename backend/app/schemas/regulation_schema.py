@@ -7,6 +7,7 @@ class RegulationFileResponse(BaseModel):
     original_filename: str
     storage_provider: str
     storage_path: str
+    public_url: str | None = None
     mime_type: str
     size_bytes: int
     sha256: str

@@ -115,7 +115,9 @@ class AlertService:
             camera_name=(alert_doc.get("snapshot") or {}).get("camera_name"),
             zone_name=(alert_doc.get("snapshot") or {}).get("zone_name"),
             employee_name=(alert_doc.get("snapshot") or {}).get("employee_name"),
-            evidence_image_path=(alert_doc.get("evidence") or {}).get("frame_storage_path"),
+            evidence_image_path=self.storage_client.get_access_url(
+                (alert_doc.get("evidence") or {}).get("frame_storage_path")
+            ),
         )
 
     def _ensure_object_id(self, value: str | ObjectId) -> ObjectId:

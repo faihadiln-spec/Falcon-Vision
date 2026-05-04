@@ -118,7 +118,7 @@ class EmployeeFaceService:
                     content=face_file["content"],
                     original_filename=face_file["filename"],
                     mime_type=face_file["mime_type"],
-                    subdirectory=f"employee_faces/{organization_id}/{employee_object_id}",
+                    subdirectory=f"employee-images/{organization_id}/{employee_object_id}",
                 )
 
                 employee_face = EmployeeFaceModel(
@@ -388,12 +388,14 @@ class EmployeeFaceService:
     def _to_employee_face_response(self, face_doc: dict) -> EmployeeFaceResponse:
         embedding = face_doc.get("embedding")
         quality = face_doc.get("quality") or {}
+        image = dict(face_doc["image"])
+        image["public_url"] = self.storage_client.get_access_url(image.get("storage_path"))
 
         return EmployeeFaceResponse(
             id=str(face_doc["_id"]),
             employee_id=str(face_doc["employee_id"]),
             organization_id=str(face_doc["organization_id"]),
-            image=face_doc["image"],
+            image=image,
             embedding=FaceEmbeddingResponse(
                 model_name=embedding["model_name"],
                 dimension=embedding["dimension"],

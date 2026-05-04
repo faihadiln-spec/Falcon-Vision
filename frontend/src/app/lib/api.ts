@@ -302,6 +302,7 @@ export interface RegulationFileResponse {
   original_filename: string;
   storage_provider: string;
   storage_path: string;
+  public_url?: string | null;
   mime_type: string;
   size_bytes: number;
   sha256: string;
@@ -627,6 +628,10 @@ export function listAlerts(token: string, limit?: number) {
 export function resolveStorageUrl(storagePath?: string | null) {
   if (!storagePath) {
     return null;
+  }
+
+  if (/^https?:\/\//i.test(storagePath)) {
+    return storagePath;
   }
 
   return new URL(storagePath.replace(/^\//, ''), `${API_BASE_URL}/`).toString();

@@ -1,8 +1,10 @@
 import asyncio
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from threading import Event
 from typing import List
 
+from bson import ObjectId
 from fastapi import UploadFile
 
 from app.core.config import get_settings
@@ -148,15 +150,17 @@ class RegulationService:
 
         organization_id = current_user["organization_id"]
         current_regulation = await self.regulation_repository.get_latest_regulation(organization_id)
-        stored_file = await self.storage_client.save_bytes(
-            content=file_content,
-            original_filename=filename,
-            mime_type=file.content_type or "application/pdf",
-            subdirectory=f"regulations/{organization_id}",
-        )
 
         if current_regulation is None:
+            regulation_id = ObjectId()
+            stored_file = await self.storage_client.save_bytes(
+                content=file_content,
+                original_filename=filename,
+                mime_type=file.content_type or "application/pdf",
+                subdirectory=f"regulations/{organization_id}/{regulation_id}/v1",
+            )
             regulation = RegulationModel(
+                id=regulation_id,
                 organization_id=organization_id,
                 title=title or Path(filename).stem,
                 description=description,
@@ -175,6 +179,13 @@ class RegulationService:
         else:
             if self._is_running_extraction_status((current_regulation.extraction.status)):
                 raise AppError("Stop the current extraction before replacing this PDF.")
+            next_version = current_regulation.version + 1
+            stored_file = await self.storage_client.save_bytes(
+                content=file_content,
+                original_filename=filename,
+                mime_type=file.content_type or "application/pdf",
+                subdirectory=f"regulations/{organization_id}/{current_regulation.id}/v{next_version}",
+            )
             await self._delete_stored_file(current_regulation.file.storage_path)
             await self.rule_repository.soft_delete_by_organization(organization_id, updated_by=current_user["_id"])
             updated_regulation = await self.regulation_repository.update_regulation(
@@ -187,7 +198,7 @@ class RegulationService:
                     "file": stored_file.model_dump(),
                     "uploaded_by": current_user["_id"],
                     "updated_by": current_user["_id"],
-                    "version": current_regulation.version + 1,
+                    "version": next_version,
                     "extraction": RegulationExtractionState(
                         status=ExtractionStatus.NOT_STARTED,
                         model_name=self.safety_extractor.model if self.safety_extractor else None,
@@ -378,19 +389,29 @@ class RegulationService:
             raise ValueError("Regulation does not belong to this organization")
 
         # Extract text from file
-        file_path = Path(regulation["file"]["storage_path"])
-
-        if not file_path.exists():
-            raise ValueError(f"Regulation file not found: {file_path}")
+        storage_path = regulation["file"]["storage_path"]
+        file_content = await self.storage_client.read_bytes(storage_path)
+        file_suffix = Path(regulation["file"]["original_filename"]).suffix or ".pdf"
 
         self._raise_if_cancelled(cancel_event)
 
-        # Extract rules using the safety rules extractor
-        extracted_data = await asyncio.to_thread(
-            self.safety_extractor.extract_from_file,
-            file_path,
-            should_cancel=cancel_event.is_set if cancel_event else None,
-        )
+        temp_file_path = None
+        try:
+            with NamedTemporaryFile(suffix=file_suffix, delete=False) as temp_file:
+                temp_file.write(file_content)
+                temp_file_path = Path(temp_file.name)
+
+            extracted_data = await asyncio.to_thread(
+                self.safety_extractor.extract_from_file,
+                temp_file_path,
+                should_cancel=cancel_event.is_set if cancel_event else None,
+            )
+        finally:
+            if temp_file_path is not None:
+                try:
+                    temp_file_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
         self._raise_if_cancelled(cancel_event)
 
@@ -647,6 +668,9 @@ class RegulationService:
         return fallback_map.get(normalized, normalized.title())
 
     def _regulation_response(self, regulation_doc: dict) -> RegulationResponse:
+        file_data = dict(regulation_doc["file"])
+        file_data["public_url"] = self.storage_client.get_access_url(file_data.get("storage_path"))
+
         return RegulationResponse(
             id=str(regulation_doc["_id"]),
             organization_id=str(regulation_doc["organization_id"]),
@@ -656,7 +680,7 @@ class RegulationService:
             status=str(regulation_doc["status"]),
             version=regulation_doc["version"],
             uploaded_by=str(regulation_doc["uploaded_by"]),
-            file=regulation_doc["file"],
+            file=file_data,
             extraction=RegulationExtractionStateResponse(
                 status=str((regulation_doc.get("extraction") or {}).get("status", ExtractionStatus.NOT_STARTED)),
                 started_at=(regulation_doc.get("extraction") or {}).get("started_at"),
@@ -728,16 +752,7 @@ class RegulationService:
     async def _delete_stored_file(self, storage_path: str | None) -> None:
         if not storage_path:
             return
-
-        file_path = Path(storage_path)
-        try:
-            if file_path.exists():
-                file_path.unlink()
-        except OSError:
-            # Best-effort cleanup. If a background parser still holds the file,
-            # the deleted DB record will hide it from the app and the next deploy
-            # or cleanup pass can remove the leftover file.
-            return
+        await self.storage_client.delete_bytes(storage_path)
 
     def _queue_extraction_job(self, *, regulation_id: str, organization_id: str, updated_by) -> None:
         self._request_job_stop(regulation_id)

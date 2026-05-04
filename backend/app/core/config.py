@@ -1,4 +1,5 @@
 import json
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -22,6 +23,9 @@ class Settings(BaseSettings):
     MAX_PDF_SIZE_MB: int = 25
     MAX_FACE_IMAGE_SIZE_MB: int = 10
     FIRE_DETECTION_ENABLED: bool = True
+    AZURE_STORAGE_CONNECTION_STRING: str | None = None
+    AZURE_STORAGE_CONTAINER: str = "fv"
+    AZURE_STORAGE_URL_EXPIRY_MINUTES: int = 60
     CORS_ORIGINS: list[str] = Field(
         default_factory=lambda: [
             "http://localhost:5173",
@@ -68,6 +72,20 @@ class Settings(BaseSettings):
             return [item.strip() for item in stripped.split(",") if item.strip()]
 
         return value
+
+    @field_validator("AZURE_STORAGE_CONTAINER")
+    @classmethod
+    def validate_azure_storage_container(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if not normalized:
+            raise ValueError("AZURE_STORAGE_CONTAINER cannot be empty")
+
+        if not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])?", normalized):
+            raise ValueError(
+                "AZURE_STORAGE_CONTAINER must be 3-63 characters and use only lowercase letters, numbers, and hyphens"
+            )
+
+        return normalized
 
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env"),

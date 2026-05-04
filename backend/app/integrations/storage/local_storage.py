@@ -9,6 +9,7 @@ from app.models.regulation_model import StoredFile
 class LocalStorageClient(StorageClient):
     def __init__(self, base_dir: Path) -> None:
         self.base_dir = Path(base_dir)
+        self.base_dir.mkdir(parents=True, exist_ok=True)
 
     async def save_bytes(
         self,
@@ -37,3 +38,20 @@ class LocalStorageClient(StorageClient):
 
     async def read_bytes(self, storage_path: str) -> bytes:
         return Path(storage_path).read_bytes()
+
+    async def delete_bytes(self, storage_path: str) -> None:
+        if not storage_path:
+            return
+
+        try:
+            file_path = Path(storage_path)
+            if file_path.exists():
+                file_path.unlink()
+        except OSError:
+            return
+
+    def get_access_url(self, storage_path: str | None) -> str | None:
+        if not storage_path:
+            return None
+
+        return Path(storage_path).as_posix()

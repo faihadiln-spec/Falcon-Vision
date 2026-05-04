@@ -1,3 +1,4 @@
+from functools import lru_cache
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
@@ -8,7 +9,9 @@ from app.core.config import get_settings
 from app.core.constants import normalize_user_role
 from app.core.security import decode_access_token
 from app.integrations.ai.face_recognition_client import FaceRecognitionClient
+from app.integrations.storage.azure_blob_storage import AzureBlobStorageClient
 from app.integrations.storage.local_storage import LocalStorageClient
+from app.integrations.storage.storage_client import StorageClient
 from app.repositories.employee_face_repository import EmployeeFaceRepository
 from app.repositories.employee_repository import EmployeeRepository
 from app.repositories.extracted_rule_repository import ExtractedRuleRepository
@@ -83,14 +86,29 @@ def get_face_recognition_client() -> FaceRecognitionClient:
     return FaceRecognitionClient()
 
 
-def get_local_storage_client() -> LocalStorageClient:
+@lru_cache
+def _build_storage_client() -> StorageClient:
     settings = get_settings()
+    if settings.AZURE_STORAGE_CONNECTION_STRING:
+        return AzureBlobStorageClient(
+            settings.AZURE_STORAGE_CONNECTION_STRING,
+            settings.AZURE_STORAGE_CONTAINER,
+            url_expiry_minutes=settings.AZURE_STORAGE_URL_EXPIRY_MINUTES,
+        )
     return LocalStorageClient(settings.UPLOAD_DIR)
+
+
+def get_storage_client() -> StorageClient:
+    return _build_storage_client()
+
+
+def get_local_storage_client() -> StorageClient:
+    return get_storage_client()
 
 
 def get_alert_service(
     alert_repository: Annotated[AlertRepository, Depends(get_alert_repository)],
-    storage_client: Annotated[LocalStorageClient, Depends(get_local_storage_client)],
+    storage_client: Annotated[StorageClient, Depends(get_storage_client)],
 ) -> AlertService:
     return AlertService(alert_repository, storage_client)
 
@@ -99,7 +117,7 @@ def get_employee_face_service(
     employee_face_repository: Annotated[EmployeeFaceRepository, Depends(get_employee_face_repository)],
     extracted_rule_repository: Annotated[ExtractedRuleRepository, Depends(get_extracted_rule_repository)],
     alert_service: Annotated[AlertService, Depends(get_alert_service)],
-    storage_client: Annotated[LocalStorageClient, Depends(get_local_storage_client)],
+    storage_client: Annotated[StorageClient, Depends(get_storage_client)],
     face_recognition_client: Annotated[FaceRecognitionClient, Depends(get_face_recognition_client)],
 ) -> EmployeeFaceService:
     settings = get_settings()
@@ -124,7 +142,7 @@ def get_ppe_service(
 def get_regulation_service(
     regulation_repository: Annotated[RegulationRepository, Depends(get_regulation_repository)],
     rule_repository: Annotated[ExtractedRuleRepository, Depends(get_extracted_rule_repository)],
-    storage_client: Annotated[LocalStorageClient, Depends(get_local_storage_client)],
+    storage_client: Annotated[StorageClient, Depends(get_storage_client)],
 ) -> RegulationService:
     return RegulationService.create(regulation_repository, rule_repository, storage_client)
 

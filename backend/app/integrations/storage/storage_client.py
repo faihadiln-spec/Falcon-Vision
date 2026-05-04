@@ -18,3 +18,11 @@ class StorageClient(ABC):
     @abstractmethod
     async def read_bytes(self, storage_path: str) -> bytes:
         raise NotImplementedError
+
+    @abstractmethod
+    async def delete_bytes(self, storage_path: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_access_url(self, storage_path: str | None) -> str | None:
+        raise NotImplementedError
