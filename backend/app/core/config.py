@@ -1,3 +1,4 @@
+import json
 from functools import lru_cache
 from pathlib import Path
 
@@ -21,6 +22,18 @@ class Settings(BaseSettings):
     MAX_PDF_SIZE_MB: int = 25
     MAX_FACE_IMAGE_SIZE_MB: int = 10
     FIRE_DETECTION_ENABLED: bool = True
+    CORS_ORIGINS: list[str] = Field(
+        default_factory=lambda: [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:5174",
+            "http://127.0.0.1:5174",
+            "http://localhost:5175",
+            "http://127.0.0.1:5175",
+            "https://falcon-vision.site",
+            "https://www.falcon-vision.site",
+        ]
+    )
 
     # Hugging Face API token for rule extraction
     HF_TOKEN: str | None = None
@@ -34,6 +47,26 @@ class Settings(BaseSettings):
                 return False
             if normalized in {"debug", "development", "dev"}:
                 return True
+        return value
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def normalize_cors_origins(cls, value: object) -> object:
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return []
+
+            if stripped.startswith("["):
+                try:
+                    parsed = json.loads(stripped)
+                except json.JSONDecodeError:
+                    parsed = None
+                if isinstance(parsed, list):
+                    return [str(item).strip() for item in parsed if str(item).strip()]
+
+            return [item.strip() for item in stripped.split(",") if item.strip()]
+
         return value
 
     model_config = SettingsConfigDict(
