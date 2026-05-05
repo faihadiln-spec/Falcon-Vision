@@ -46,6 +46,7 @@ export default function App() {
           <Route path="/admin/supervisors" element={<MonitorAccessPermissionPage />} />
           <Route path="/admin/monitor-access" element={<MonitorAccessPermissionPage />} />
           <Route path="/admin/alerts-history" element={<AdminAlertsHistoryPage />} />
+          <Route path="/admin/help" element={<HelpPage />} />
         </Route>
 
         <Route element={<ProtectedRoute allowedRoles={['supervisor']} />}>
@@ -54,6 +55,7 @@ export default function App() {
           <Route path="/supervisor/alerts-history" element={<SupervisorAlertsHistoryPage />} />
           <Route path="/supervisor/settings" element={<SupervisorSettingsPage />} />
           <Route path="/supervisor/profile" element={<SupervisorProfilePage />} />
+          <Route path="/supervisor/help" element={<HelpPage />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

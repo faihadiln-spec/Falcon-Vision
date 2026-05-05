@@ -2,11 +2,14 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ChevronDown, ChevronUp, Mail } from 'lucide-react';
 import { Footer } from '../components/Footer';
+import { getAuthUser, getHomePathForRole } from '../lib/auth';
 import logoImage from '../../assets/images/logo.png';
 
 export function HelpPage() {
   const [openFaq, setOpenFaq] = useState<number | null>(0);
   const [contactFormOpen, setContactFormOpen] = useState(false);
+  const user = getAuthUser();
+  const homePath = user ? getHomePathForRole(user.role) : '/';
 
   const supportEmail = import.meta.env.VITE_SUPPORT_EMAIL?.trim() || 'support@falcon-vision.site';
   const contactHref = `mailto:${supportEmail}?subject=${encodeURIComponent('Falcon Vision support')}`;
@@ -56,7 +59,7 @@ export function HelpPage() {
       <nav className="bg-white shadow-sm border-b border-[#e0d5c7]">
         <div className="w-full max-w-7xl mx-auto px-4 sm:px-6">
           <div className="flex justify-between items-center h-16">
-            <Link to="/" className="flex min-w-0 items-center gap-2">
+            <Link to={homePath} className="flex min-w-0 items-center gap-2">
               <img src={logoImage} alt="Falcon Vision Logo" className="w-10 h-10 sm:w-12 sm:h-12 flex-shrink-0" />
               <span className="font-serif text-lg sm:text-xl text-[#d87545] truncate">Falcon Vision</span>
             </Link>
