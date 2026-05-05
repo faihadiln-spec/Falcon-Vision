@@ -164,7 +164,19 @@ export function UploadRegulationPage() {
 
     try {
       const response = await uploadRegulation(selectedFile, token);
-      applyCurrentRegulation(response);
+      const savedRegulations = await listRegulations(token).catch(() =>
+        mergeRegulationLists(
+          [...(currentRegulation?.regulations ?? []), ...(response.regulations ?? [])],
+          response.regulation,
+        ),
+      );
+      applyCurrentRegulation({
+        ...response,
+        regulations: mergeRegulationLists(
+          [...(currentRegulation?.regulations ?? []), ...savedRegulations],
+          response.regulation,
+        ),
+      });
     } catch (error) {
       if (isTokenError(error)) {
         handleTokenExpiry();
