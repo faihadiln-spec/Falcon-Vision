@@ -1,4 +1,4 @@
-"""Fire and smoke detection with multimodal fusion of sensor and vision data."""
+"""Fire and smoke detection with YOLO vision inference and optional sensor fusion."""
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -10,9 +10,8 @@ from ultralytics import YOLO
 
 try:
     import joblib
-    from sklearn.preprocessing import StandardScaler
 except ImportError:
-    raise ImportError("joblib and scikit-learn are required for fire detection. Install with: pip install joblib scikit-learn")
+    joblib = None
 
 
 class AlertLevel(str, Enum):
@@ -55,29 +54,35 @@ class FireSmokeDetector:
     def __init__(
         self,
         yolo_model_path: str | Path,
-        sensor_model_path: str | Path,
-        scaler_path: str | Path,
-        label_encoder_path: str | Path,
-        conf_threshold: float = 0.4,
-        image_size: int = 416,
+        sensor_model_path: str | Path | None = None,
+        scaler_path: str | Path | None = None,
+        label_encoder_path: str | Path | None = None,
+        conf_threshold: float = 0.25,
     ):
-        """Initialize fire/smoke detector with YOLO and ML models.
+        """Initialize fire/smoke detector with YOLO and optional ML sensor models.
 
         Args:
             yolo_model_path: Path to YOLO fire/smoke detection model (.pt)
-            sensor_model_path: Path to trained sensor classifier (Logistic Regression) (.pkl)
-            scaler_path: Path to StandardScaler for sensor data (.pkl)
-            label_encoder_path: Path to LabelEncoder for sensor predictions (.pkl)
+            sensor_model_path: Optional path to trained sensor classifier (.pkl)
+            scaler_path: Optional path to scaler for sensor data (.pkl)
+            label_encoder_path: Optional path to label encoder for sensor predictions (.pkl)
             conf_threshold: Confidence threshold for detections
         """
-        self.yolo_model = YOLO(str(yolo_model_path))
-        self.sensor_model = joblib.load(str(sensor_model_path))
-        self.scaler = joblib.load(str(scaler_path))
-        self.label_encoder = joblib.load(str(label_encoder_path))
+        self.yolo_model = YOLO(str(yolo_model_path), task="detect")
+        self.sensor_model = None
+        self.scaler = None
+        self.label_encoder = None
         self.conf_threshold = conf_threshold
-        self.image_size = image_size
 
-        self.class_names = {0: "fire", 1: "smoke"}
+        self.class_names = {
+            int(class_id): str(class_name).strip().lower()
+            for class_id, class_name in self.yolo_model.names.items()
+        }
+
+        if sensor_model_path and scaler_path and label_encoder_path and joblib is not None:
+            self.sensor_model = joblib.load(str(sensor_model_path))
+            self.scaler = joblib.load(str(scaler_path))
+            self.label_encoder = joblib.load(str(label_encoder_path))
 
     def detect_fire_smoke_image(self, image: np.ndarray) -> tuple[str, List[FireDetection]]:
         """Detect fire/smoke in image using YOLO.
@@ -88,40 +93,34 @@ class FireSmokeDetector:
         Returns:
             Tuple of (decision: none/smoke/fire, detections: list of FireDetection)
         """
-        # Run YOLO inference
-        results = self.yolo_model.predict(
-            source=image,
-            imgsz=self.image_size,
-            conf=self.conf_threshold,
-            verbose=False
-        )
+        results = self.yolo_model.predict(image, conf=self.conf_threshold, verbose=False)
+        result = results[0]
 
         detections = []
         fire_scores = []
         smoke_scores = []
 
-        for result in results:
-            if result.boxes is None or len(result.boxes) == 0:
-                continue
+        boxes = result.boxes
+        if boxes is None or len(boxes) == 0:
+            return "none", detections
 
-            for box in result.boxes:
-                cls_id = int(box.cls.item())
-                conf = float(box.conf.item())
-                bbox = box.xyxy[0].cpu().numpy()
-                label = self.class_names.get(cls_id, str(cls_id))
+        for box in boxes:
+            cls_id = int(box.cls[0].item())
+            conf = float(box.conf[0].item())
+            bbox = box.xyxy[0].cpu().numpy()
+            label = self.class_names.get(cls_id, str(cls_id))
 
-                if conf >= self.conf_threshold:
-                    detection = FireDetection(
-                        class_name=label,
-                        confidence=conf,
-                        bbox=bbox.tolist()
-                    )
-                    detections.append(detection)
+            detection = FireDetection(
+                class_name=label,
+                confidence=conf,
+                bbox=bbox.tolist()
+            )
+            detections.append(detection)
 
-                    if label == "fire":
-                        fire_scores.append(conf)
-                    elif label == "smoke":
-                        smoke_scores.append(conf)
+            if label == "fire":
+                fire_scores.append(conf)
+            elif label == "smoke":
+                smoke_scores.append(conf)
 
         # Determine image decision
         if fire_scores:
@@ -142,6 +141,9 @@ class FireSmokeDetector:
         Returns:
             Prediction: "background", "nuisance", or "fire"
         """
+        if self.sensor_model is None or self.scaler is None or self.label_encoder is None:
+            return "not_available"
+
         if len(sensor_data) != 8:
             raise ValueError(f"Expected 8 sensor features, got {len(sensor_data)}")
 
@@ -303,8 +305,12 @@ class FireSmokeDetector:
             default=0.0
         )
 
-        # Sensor detection
-        if sensor_data is None or len(sensor_data) == 0:
+        sensor_pred = "not_available"
+        if sensor_data is not None and len(sensor_data) > 0:
+            sensor_pred = self.predict_sensor_status(sensor_data)
+
+        # Sensor detection is optional. Camera monitoring uses image-only inference.
+        if sensor_data is None or len(sensor_data) == 0 or sensor_pred == "not_available":
             # No sensor data, use image only
             if image_decision == "fire":
                 alert_level = AlertLevel.HIGH_ALERT
@@ -314,16 +320,13 @@ class FireSmokeDetector:
                 alert_level = AlertLevel.NO_ALERT
 
             return MultimodalFireResult(
-                sensor_prediction="not_available",
+                sensor_prediction=sensor_pred,
                 image_detections=detections,
                 image_decision=image_decision,
                 image_confidence=image_confidence,
                 alert_level=alert_level,
                 reason="Image-only detection (sensor data not available)"
             )
-
-        # Sensor prediction
-        sensor_pred = self.predict_sensor_status(sensor_data)
 
         # Multimodal fusion
         result = self.multimodal_fusion(sensor_pred, image_decision, image_confidence)

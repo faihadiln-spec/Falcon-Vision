@@ -19,7 +19,7 @@ from app.repositories.extracted_rule_repository import ExtractedRuleRepository
 class FireDetectionService:
     """Service for fire/smoke detection with multimodal fusion."""
 
-    PROJECT_ROOT = Path(__file__).resolve().parents[3]
+    APP_ROOT = Path(__file__).resolve().parents[1]
     _detector_cache: FireSmokeDetector | None = None
     _detector_initialized = False
     _detector_lock = Lock()
@@ -47,27 +47,24 @@ class FireDetectionService:
 
             cls._detector_initialized = True
 
-            # Model paths live in the repo root /Fire Detection directory.
-            yolo_model_path = cls.PROJECT_ROOT / "Fire Detection" / "fire_smoke_model.pt"
-            sensor_model_path = cls.PROJECT_ROOT / "Fire Detection" / "ml_lr_classifier.pkl"
+            # Fire/smoke YOLO model lives with the backend fire detection integration.
+            model_dir = cls.APP_ROOT / "integrations" / "ai" / "fire_detection"
+            yolo_model_path = model_dir / "best.pt"
+            sensor_model_path = model_dir / "ml_lr_classifier.pkl"
             scaler_path = cls._first_existing_model_path("ml_scaler.pkl", "ml_lrـscaler.pkl")
             label_encoder_path = cls._first_existing_model_path("ml_label_encoder.pkl", "ml_lrـlabel_encoder.pkl")
 
-            # Check if models exist
-            required_files = [yolo_model_path, sensor_model_path, scaler_path, label_encoder_path]
-            missing = [f for f in required_files if not f.exists()]
-
-            if missing:
-                print(f"Warning: Fire detection models not found: {missing}")
-                print("Fire detection service is unavailable until the model files are present")
+            if not yolo_model_path.exists():
+                print(f"Warning: Fire detection YOLO model not found: {yolo_model_path}")
+                print("Fire detection service is unavailable until the model file is present")
                 return None
 
             try:
                 cls._detector_cache = FireSmokeDetector(
                     yolo_model_path=yolo_model_path,
-                    sensor_model_path=sensor_model_path,
-                    scaler_path=scaler_path,
-                    label_encoder_path=label_encoder_path,
+                    sensor_model_path=sensor_model_path if sensor_model_path.exists() else None,
+                    scaler_path=scaler_path if scaler_path.exists() else None,
+                    label_encoder_path=label_encoder_path if label_encoder_path.exists() else None,
                 )
             except Exception as e:
                 print(f"Error initializing fire detector: {e}")
@@ -77,7 +74,7 @@ class FireDetectionService:
 
     @classmethod
     def _first_existing_model_path(cls, *filenames: str) -> Path:
-        model_dir = cls.PROJECT_ROOT / "Fire Detection"
+        model_dir = cls.APP_ROOT / "integrations" / "ai" / "fire_detection"
         for filename in filenames:
             path = model_dir / filename
             if path.exists():
