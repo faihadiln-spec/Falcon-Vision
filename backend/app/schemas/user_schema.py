@@ -11,7 +11,7 @@ class UserCreateRequest(BaseModel):
     password: str = Field(min_length=8, max_length=72)
     role: UserRole = UserRole.SUPERVISOR
     employee_id: str | None = Field(default=None, min_length=1, max_length=50)
-    phone: str | None = Field(default=None, max_length=30)
+    phone: str | None = Field(default=None, pattern=r"^05\d{8}$")
     job_title: str | None = Field(default=None, max_length=80)
 
 
@@ -21,7 +21,7 @@ class UserUpdateRequest(BaseModel):
     password: str | None = Field(default=None, min_length=8, max_length=72)
     role: UserRole | None = None
     employee_id: str | None = Field(default=None, min_length=1, max_length=50)
-    phone: str | None = Field(default=None, max_length=30)
+    phone: str | None = Field(default=None, pattern=r"^05\d{8}$")
     job_title: str | None = Field(default=None, max_length=80)
 
 

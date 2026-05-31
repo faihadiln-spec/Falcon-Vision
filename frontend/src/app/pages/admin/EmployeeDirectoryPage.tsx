@@ -6,6 +6,7 @@ import { Footer } from '../../components/Footer';
 import { WarningModal } from '../../components/WarningModal';
 import { ConfirmationModal } from '../../components/ConfirmationModal';
 import { getAccessToken } from '../../lib/auth';
+import { isValidEmail, isValidSaudiMobile, validateRequiredFields } from '../../lib/validation';
 import {
   createEmployee,
   deleteEmployee,
@@ -63,6 +64,31 @@ function buildFormFromEmployee(employee: EmployeeResponse): EmployeeFormState {
   };
 }
 
+function validateEmployeeForm(form: EmployeeFormState) {
+  const missingMessage = validateRequiredFields([
+    { label: 'ID', value: form.employee_number },
+    { label: 'full name', value: form.full_name },
+    { label: 'department', value: form.department },
+    { label: 'job title', value: form.job_title },
+    { label: 'phone number', value: form.phone },
+    { label: 'email address', value: form.email },
+  ]);
+
+  if (missingMessage) {
+    return missingMessage;
+  }
+
+  if (!isValidSaudiMobile(form.phone)) {
+    return 'Phone number must be a Saudi mobile number starting with 05 and containing exactly 10 digits.';
+  }
+
+  if (!isValidEmail(form.email)) {
+    return 'Please enter a valid email address, such as name@gmail.com or name@hotmail.com.';
+  }
+
+  return null;
+}
+
 export function EmployeeDirectoryPage() {
   const [employees, setEmployees] = useState<EmployeeResponse[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -109,11 +135,12 @@ export function EmployeeDirectoryPage() {
       return;
     }
 
-    if (!newEmployee.employee_number.trim() || !newEmployee.full_name.trim()) {
+    const validationMessage = validateEmployeeForm(newEmployee);
+    if (validationMessage) {
       setModalState({
         isOpen: true,
-        title: 'Missing Information',
-        message: 'ID and full name are required.',
+        title: 'Check Employee Details',
+        message: validationMessage,
       });
       return;
     }
@@ -146,11 +173,12 @@ export function EmployeeDirectoryPage() {
       return;
     }
 
-    if (!editEmployee.employee_number.trim() || !editEmployee.full_name.trim()) {
+    const validationMessage = validateEmployeeForm(editEmployee);
+    if (validationMessage) {
       setModalState({
         isOpen: true,
-        title: 'Missing Information',
-        message: 'ID and full name are required.',
+        title: 'Check Employee Details',
+        message: validationMessage,
       });
       return;
     }

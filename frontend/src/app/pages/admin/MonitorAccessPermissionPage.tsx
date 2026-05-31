@@ -6,6 +6,7 @@ import { Footer } from '../../components/Footer';
 import { WarningModal } from '../../components/WarningModal';
 import { ConfirmationModal } from '../../components/ConfirmationModal';
 import { getAccessToken } from '../../lib/auth';
+import { isValidEmail, isValidSaudiMobile, validateRequiredFields } from '../../lib/validation';
 import {
   createUser,
   deleteUser,
@@ -46,6 +47,35 @@ function formatLastLogin(lastLoginAt?: string | null) {
     hour: '2-digit',
     minute: '2-digit',
   })}`;
+}
+
+function validateSupervisorForm(form: SupervisorFormState, options: { requirePassword: boolean }) {
+  const missingMessage = validateRequiredFields([
+    { label: 'ID', value: form.employee_id },
+    { label: 'full name', value: form.full_name },
+    { label: 'email address', value: form.email },
+    { label: 'job title', value: form.job_title },
+    { label: 'phone number', value: form.phone },
+    ...(options.requirePassword ? [{ label: 'temporary password', value: form.password }] : []),
+  ]);
+
+  if (missingMessage) {
+    return missingMessage;
+  }
+
+  if (!isValidEmail(form.email)) {
+    return 'Please enter a valid email address, such as name@gmail.com or name@hotmail.com.';
+  }
+
+  if (!isValidSaudiMobile(form.phone)) {
+    return 'Phone number must be a Saudi mobile number starting with 05 and containing exactly 10 digits.';
+  }
+
+  if (form.password.trim() && form.password.length < 8) {
+    return 'Temporary password must be at least 8 characters.';
+  }
+
+  return null;
 }
 
 export function MonitorAccessPermissionPage() {
@@ -115,16 +145,12 @@ export function MonitorAccessPermissionPage() {
       return;
     }
 
-    if (
-      !newSupervisor.employee_id.trim()
-      || !newSupervisor.full_name.trim()
-      || !newSupervisor.email.trim()
-      || !newSupervisor.password.trim()
-    ) {
+    const validationMessage = validateSupervisorForm(newSupervisor, { requirePassword: true });
+    if (validationMessage) {
       setModalState({
         isOpen: true,
-        title: 'Missing Information',
-        message: 'Supervisor ID, name, email, and a temporary password are required.',
+        title: 'Check Supervisor Details',
+        message: validationMessage,
       });
       return;
     }
@@ -173,11 +199,12 @@ export function MonitorAccessPermissionPage() {
       return;
     }
 
-    if (!editSupervisor.employee_id.trim() || !editSupervisor.full_name.trim() || !editSupervisor.email.trim()) {
+    const validationMessage = validateSupervisorForm(editSupervisor, { requirePassword: false });
+    if (validationMessage) {
       setModalState({
         isOpen: true,
-        title: 'Missing Information',
-        message: 'Supervisor ID, name, and email are required.',
+        title: 'Check Supervisor Details',
+        message: validationMessage,
       });
       return;
     }

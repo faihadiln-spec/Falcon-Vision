@@ -12,7 +12,7 @@ class EmployeeCreateRequest(BaseModel):
     job_title: str | None = Field(default=None, max_length=80)
     employment_type: EmploymentType = EmploymentType.EMPLOYEE
     status: EntityStatus = EntityStatus.ACTIVE
-    phone: str | None = Field(default=None, max_length=30)
+    phone: str | None = Field(default=None, pattern=r"^05\d{8}$")
     email: EmailStr | None = None
     requires_ppe: bool = True
     ppe_requirements: list[str] = Field(default_factory=list)
@@ -26,7 +26,7 @@ class EmployeeUpdateRequest(BaseModel):
     job_title: str | None = Field(default=None, max_length=80)
     employment_type: EmploymentType | None = None
     status: EntityStatus | None = None
-    phone: str | None = Field(default=None, max_length=30)
+    phone: str | None = Field(default=None, pattern=r"^05\d{8}$")
     email: EmailStr | None = None
     requires_ppe: bool | None = None
     ppe_requirements: list[str] | None = None

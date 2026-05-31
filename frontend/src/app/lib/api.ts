@@ -23,6 +23,36 @@ interface RequestOptions {
   signal?: AbortSignal;
 }
 
+function formatValidationDetail(detail: unknown) {
+  if (!Array.isArray(detail)) {
+    return null;
+  }
+
+  const messages = detail
+    .map((item) => {
+      if (!item || typeof item !== 'object') {
+        return null;
+      }
+
+      const validationItem = item as { loc?: unknown; msg?: unknown };
+      if (typeof validationItem.msg !== 'string') {
+        return null;
+      }
+
+      const location = Array.isArray(validationItem.loc)
+        ? validationItem.loc
+            .filter((part) => part !== 'body')
+            .join(' ')
+            .replaceAll('_', ' ')
+        : '';
+
+      return location ? `${location}: ${validationItem.msg}` : validationItem.msg;
+    })
+    .filter(Boolean);
+
+  return messages.length > 0 ? messages.join('\n') : null;
+}
+
 export interface LoginRequest {
   email: string;
   password: string;
@@ -473,9 +503,12 @@ async function apiRequest<T>(path: string, options: RequestOptions = {}) {
   const payload = await response.json().catch(() => null);
 
   if (!response.ok) {
+    const validationMessage = formatValidationDetail(payload?.detail);
     const message =
       typeof payload?.detail === 'string'
         ? payload.detail
+        : validationMessage
+          ? validationMessage
         : `Request failed with status ${response.status}`;
 
     throw new Error(message);
